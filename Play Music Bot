@@ -1,0 +1,70 @@
+import discord
+import os
+import asyncio
+import yt_dlp
+from dotenv import load_dotenv
+from pathlib import Path
+
+current_dir = Path(__file__).parent
+env_file = current_dir / '.env'
+load_dotenv(dotenv_path=env_file)
+
+ffmpeg_path = current_dir / 'bin' / 'ffmpeg.exe'
+if not ffmpeg_path.exists():
+    ffmpeg_path = current_dir / 'ffmpeg.exe'
+
+if ffmpeg_path.exists():
+    print(f"FFmpeg found at: {ffmpeg_path}")
+    os.environ["PATH"] += os.pathsep + str(ffmpeg_path.parent)
+else:
+    print("CRITICAL ERROR: ffmpeg.exe was not found!")
+
+intents = discord.Intents.default()
+intents.message_content = True
+
+client = discord.Client(intents=intents)
+DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
+
+yt_dl_opts = {'format': 'bestaudio/best', 'quiet': True, 'nocheckcertificate': True}
+ytdl = yt_dlp.YoutubeDL(yt_dl_opts)
+
+ffmpeg_options = {'options': '-vn'}
+
+@client.event
+async def on_ready():
+    print(f'{client.user} has connected to Discord!')
+
+@client.event
+async def on_message(msg):
+    if msg.author == client.user:
+        return
+
+    if msg.content.startswith('!play'):
+        if msg.author.voice:
+            try:
+                voice_client = await msg.author.voice.channel.connect()
+            except discord.ClientException:
+                voice_client = msg.guild.voice_client
+
+            try:
+                url = msg.content.split()[1]
+                loop = asyncio.get_event_loop()
+                data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=False))
+
+                if 'entries' in data:
+                    data = data['entries'][0]
+
+                song = data['url']
+                player = discord.FFmpegPCMAudio(song, **ffmpeg_options)
+
+                voice_client.play(player)
+
+            except Exception as err:
+                print(err)
+        else:
+            await msg.channel.send("You need to be in a voice channel.")
+
+if DISCORD_TOKEN:
+    client.run(DISCORD_TOKEN)
+else:
+    print("ERROR: No Discord Token found.")
